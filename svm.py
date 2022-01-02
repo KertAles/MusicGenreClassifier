@@ -6,56 +6,49 @@ Created on Sun Dec 19 19:36:09 2021
 """
 
 from sklearn import svm
-from loadData import load_split_data, load_data, load_split_data_mfcc
+from loadData import load_data, get_genres, get_features
+from evaluation import evaluate_predictions
 
 
-def superclassify(label) :
-    ret = ''
-    if label == 'blues' or label == 'jazz' or label == 'metal' or label == 'rock' or label == 'classical' :
-        ret = 'group1'
-    else :
-        ret = 'group2'
+def train_eval_svm(data, labels, test_data, test_labels, decision_function='ovr'): 
         
-    return ret
+    clf = svm.SVC(decision_function_shape=decision_function)
+    clf.fit(data, labels)
+    
+    classes = set(labels)
+    
+    confusion = {}
+    
+    for clas in classes :
+        confusion[clas] = {}
+        for clas2 in classes :
+            confusion[clas][clas2] = 0
+    
+    predictions = clf.predict(test_data)
+    
+    return evaluate_predictions(predictions, test_labels)
 
+    
 
-points, labels, t_p, t_l = load_split_data_mfcc(shuffle=True)
-
-nu_labels = labels
-nu_t_labels = t_l
-
-nu_labels.apply(superclassify)
-nu_t_labels.apply(superclassify)
-
+if __name__ == '__main__':
+    data, labels, test_data, test_labels = load_data(shuffle=True)
+    
+    evaluation = train_eval_svm(data, labels, test_data, test_labels)
+    
+    
 """
-nu_labels = ['group1' for i in range(len(nu_labels)) if nu_labels[i] == 'blues' or nu_labels[i] == 'country' or nu_labels[i] == 'metal' or nu_labels[i] == 'rock' or nu_labels[i] == 'reggae']
-nu_labels = ['group2' for i in range(len(nu_labels)) if nu_labels[i] == 'classical' or nu_labels[i] == 'disco' or nu_labels[i] == 'hiphop' or nu_labels[i] == 'jazz' or nu_labels[i] == 'pop']
+feat = 'mvc'
+gen = 'all'
+prep = 'instant'
 
-nu_t_labels = ['group1' for i in range(len(nu_labels)) if nu_labels[i] == 'blues' or nu_labels[i] == 'country' or nu_labels[i] == 'metal' or nu_labels[i] == 'rock' or nu_labels[i] == 'reggae']
-nu_t_labels = ['group2' for i in range(len(nu_labels)) if nu_labels[i] == 'classical' or nu_labels[i] == 'disco' or nu_labels[i] == 'hiphop' or nu_labels[i] == 'jazz' or nu_labels[i] == 'pop']
+if gen == 'all' :
+    genres = get_genres('all')
+if gen == 'ps' :
+    genres = get_genres('paper_split')
+if gen == 'cs1' :
+    genres = get_genres('custom_split')
+ 
+features = get_features(feat)
+
+data_train, label_train, data_test, label_test = load_data(split=0.8, shuffle=True, prep=prep, take_middle=False, genres=genres, features=features)
 """
-
-clf = svm.SVC(decision_function_shape='ovo')
-clf.fit(points, labels)
-
-
-preds = clf.predict(t_p)
-
-tru = 0
-fal = 0
-
-labels = list(labels)
-t_l = list(t_l)
-
-nu_labels = list(nu_labels)
-nu_t_labels = list(nu_t_labels)
-
-for idx, pred in enumerate(preds):
-    if pred == t_l[idx] :
-        tru += 1
-    else:
-        fal += 1
-        
-        
-acc = tru / (tru + fal)
-print(acc)

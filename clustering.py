@@ -6,61 +6,79 @@ Created on Sun Dec 19 18:55:57 2021
 """
 
 from sklearn.cluster import KMeans
-from loadData import load_split_data, load_data
+from loadData import load_data
 from collections import Counter
-
-
-points, labels, t_p, t_l = load_split_data(shuffle=True)
-
-labels = list(labels)
-t_l = list(t_l)
-
-n_clusters = 30
-
-
-kmeans = KMeans(n_clusters=n_clusters)
-kmeans.fit(points)
-#print(kmeans.cluster_centers_)
-y_km = kmeans.fit_predict(points)
+from evaluation import evaluate_predictions
 
 def most_common(lst):
     return max(set(lst), key=lst.count)
 
-tru = 0
-fal = 0
-
-classes = []
-
-for i in range(0,n_clusters) :
-    indices = [j for j, x in enumerate(y_km) if x == i]
+def train_eval_clustering(points, labels, test_points, test_labels, n_clusters=20) :
     
-    c = Counter([labels[ix] for ix in indices])
-    tup = c.most_common(1)
+    labels = list(labels)
+    test_labels = list(test_labels)
     
-    classes.append(tup[0][0])
+    kmeans = KMeans(n_clusters=n_clusters)
+    kmeans.fit(points)
+    y_km = kmeans.fit_predict(points)
     
-    tru += tup[0][1]
-    fal += len(indices) - tup[0][1]
+    tru = 0
+    fal = 0
+    
+    classes = []
+    
+    for i in range(0,n_clusters) :
+        indices = [j for j, x in enumerate(y_km) if x == i]
+        
+        c = Counter([labels[ix] for ix in indices])
+        tup = c.most_common(1)
+        
+        classes.append(tup[0][0])
+        
+        tru += tup[0][1]
+        fal += len(indices) - tup[0][1]
+        
+        
+    acc = tru / (tru + fal)
     
     
-acc = tru / (tru + fal)
-print(acc)
-
-
-
-preds = kmeans.predict(t_p)
-
-tr = 0
-fa = 0
-
-for idx, pred in enumerate(preds) :
     
-    if classes[pred] == t_l[idx] :
-        tr += 1
-    else :
-        fa += 1
+    preds = kmeans.predict(test_points)
     
-ac = tr / (tr + fa)
+    tr = 0
+    fa = 0
+    
+    for idx, pred in enumerate(preds) :
+        
+        if classes[pred] == test_labels[idx] :
+            tr += 1
+        else :
+            fa += 1
+        
+    ac = tr / (tr + fa)
+    
+    return (ac, tr, fa)
+    """
+    classes = []
 
-print(ac)
+    for i in range(0,n_clusters) :
+        indices = [j for j, x in enumerate(y_km) if x == i]
+        
+        c = Counter([labels[ix] for ix in indices])
+        tup = c.most_common(1)
+        
+        classes.append(tup[0][0])
+        
+    #print(classes)
+    predictions = kmeans.predict(test_points)
+    
+    evaluation = evaluate_predictions(predictions, test_labels, classes)
+    
+    return evaluation
+    """
 
+
+if __name__ == '__main__':
+    points, labels, test_points, test_labels = load_data(shuffle=True)
+    
+    evaluation = train_eval_clustering(points, labels, test_points, test_labels)

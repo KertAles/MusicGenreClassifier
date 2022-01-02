@@ -41,6 +41,9 @@ from scipy.io import wavfile
 import random
 from aenum import Enum, MultiValue
 
+
+from loadData import load_data, get_genres
+
 class Genre(Enum) :
     _init_ = 'value fullname'
     _settings_ = MultiValue
@@ -59,10 +62,11 @@ class Genre(Enum) :
     def __int__(self):
         return self.value
 
-class SpectImages(keras.utils.Sequence):
+class SpectGen(keras.utils.Sequence):
 
-    def __init__(self, images, batch_size=8, img_size=(360,480)):
+    def __init__(self, images, labels, batch_size=8, img_size=(129, 600)):
         self.images = images
+        self.labels = labels
         
         self.batch_size = batch_size
         self.img_size = img_size
@@ -78,48 +82,26 @@ class SpectImages(keras.utils.Sequence):
             
         
         batch_images = self.images[i : i + self.batch_size]
+        batch_labels = self.labels[i : i + self.batch_size]
         
-        return self.getData(batch_images)
+        return self.getData(batch_images, batch_labels)
     
     def __len__(self):
         ret = len(self.images) // self.batch_size
         
         return ret
     
-    def getData(self, batch_images, aug_round=0) :
+    def getData(self, batch_images, batch_labels, aug_round=0) :
         
         x = []
         y = []
         
-        for j, path in enumerate(batch_images):
-            #img = np.array(load_img(path, color_mode="rgb"))
-            
-            sample_rate, samples = wavfile.read(path)
-            frequencies, times, spectrogram = signal.spectrogram(samples, sample_rate)
+        for j, img in enumerate(batch_images):
 
-            m_class = path.split('/')[-1].split('\\')[0]
-            class_vect = np.zeros((10, 10))
-            class_vect[Genre(m_class).value][Genre(m_class).value] = 1
+            x.append(img)
             
-            
-            spectrogram = np.expand_dims(spectrogram[:, 1000:1900], axis=-1)
-            
-            
-            #print(np.shape(spectrogram))
-            #print(type(spectrogram))
-            
-            
-            """
-            img = img - np.min(img)
-            img = ((img / np.max(img)) * 2) - 1
-            """
-            #img = img / 255
-
-            spectrogram = spectrogram - np.min(spectrogram)
-            spectrogram = ((spectrogram / np.max(spectrogram)) * 2) - 1
-             
-            x.append(spectrogram.astype('float64'))
-            y.append(class_vect)
+        for j, lab in enumerate(batch_labels):
+            y.append(lab)
             
         return np.array(x), np.array(y)
     
@@ -148,7 +130,7 @@ class Classifier:
         
         keras.backend.clear_session()
     
-        val_gen = SpectImages(val_images, val_masks, batch_size=1)
+        val_gen = SpectGen(val_images, val_masks, batch_size=1)
         
         return self.model.predict(val_gen)
 
@@ -188,8 +170,8 @@ class Classifier:
         """
         keras.backend.clear_session()
             
-        train_gen = SpectImages(train_images, batch_size=batch_size)
-        val_gen = SpectImages(val_images, batch_size=batch_size)
+        #train_gen = SpectImages(train_images, batch_size=batch_size)
+        #val_gen = SpectImages(val_images, batch_size=batch_size)
         
         
         #inputs, outputs, self.model = self.unet_model_blocks(block_number=block_number, filter_number=filter_number)
@@ -207,6 +189,9 @@ class Classifier:
             keras.callbacks.ModelCheckpoint("ear_segmentation", save_best_only=True)
         ]
             
+        train_gen = None
+        val_gen = None
+        
         history = self.model.fit(train_gen, epochs=epochs, validation_data=val_gen, callbacks=callbacks)
         #history = self.model.fit(train_ds, epochs=epochs, validation_data=val_ds, callbacks=callbacks)
         
@@ -224,56 +209,256 @@ class Classifier:
             hist_df.to_json(f)
         
 
-    def cnn_model(self, inputs=None, num_classes=10):
+    def cnn_model(self, inputs=None, num_classes=10, num_of_channels=1):
         if inputs is None:
-            num_of_channels = 1
             
-            inputs = layers.Input((129, 900) + (num_of_channels, ))
+            inputs = layers.Input((128, 512) + (num_of_channels, ))
             
         x = inputs
         
-        x = Rescaling(1./255)(x)
+        #x = Rescaling(1./255)(x)
 
-        conv1 = Conv2D(16, (3, 3), activation="relu", padding="same")(x)
+        conv1 = Conv2D(16, (3, 3), activation=tf.keras.layers.LeakyReLU(alpha=0.2), padding="same")(x)
+        conv1 = MaxPooling2D(pool_size=(2, 2))(conv1)
         
-        conv1 = Conv2D(24, (3, 3), activation="relu", padding="same")(conv1)
-        pool1 = MaxPooling2D(pool_size=(3, 3))(conv1)
-        pool1 = Dropout(0.25)(pool1)
+        conv1 = Conv2D(20, (3, 3), activation=tf.keras.layers.LeakyReLU(alpha=0.2), padding="same")(conv1)
+        pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
+        pool1 = Dropout(0.05)(pool1)
 
-        conv2 = Conv2D(32, (3, 3), activation="relu", padding="same")(pool1)
-        pool2 = MaxPooling2D(pool_size=(3, 3))(conv2)
-        pool2 = Dropout(0.25)(pool2)
+        conv2 = Conv2D(24, (3, 3), activation=tf.keras.layers.LeakyReLU(alpha=0.2), padding="same")(pool1)
+        pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)
+        pool2 = BatchNormalization()(pool2)
         
-        conv3 = Conv2D(48, (3, 3), activation="relu", padding="same")(pool2)
+        conv3 = Conv2D(28, (3, 3), activation=tf.keras.layers.LeakyReLU(alpha=0.2), padding="same")(pool2)
         pool3 = MaxPooling2D(pool_size=(2, 2))(conv3)
-        pool3 = Dropout(0.25)(pool3)
+        pool3 = Dropout(0.05)(pool3)
+        
+        conv4 = Conv2D(32, (3, 3), activation=tf.keras.layers.LeakyReLU(alpha=0.2), padding="same")(pool3)
+        pool4 = MaxPooling2D(pool_size=(2, 2))(conv4)
+        pool4 = Dropout(0.05)(pool4)
         
         
-        flat = Flatten()(pool3)
+        flat = Flatten()(pool4)
         
-        dense1 = Dense(1000, activation='relu')(flat)
-        dense1 = Dropout(0.4)(dense1)
+        dense1 = Dense(40, activation=tf.keras.layers.LeakyReLU(alpha=0.2))(flat)
+        dense1 = Dropout(0.1)(dense1)
         
-        dense2 = Dense(500, activation='relu')(dense1)
-        dense2 = Dropout(0.35)(dense2)
+        dense2 = Dense(20, activation=tf.keras.layers.LeakyReLU(alpha=0.2))(dense1)
         
-        dense3 = Dense(125, activation='relu')(dense2)
-        dense3 = Dropout(0.3)(dense3)
+        dense3 = Dense(10, activation=tf.keras.layers.LeakyReLU(alpha=0.2))(dense2)
+
+        dense4 = Dense(num_classes, activation='softmax')(dense3)
         
-        dense4 = Dense(60, activation='relu')(dense3)
-        dense4 = Dropout(0.25)(dense4)
+        model = keras.Model(inputs, dense4)
+
+        return inputs, dense4, model
 
 
-        dense5 = Dense(num_classes, activation='softmax')(dense2)
+
+from keras.utils import np_utils
+from sklearn.preprocessing import LabelEncoder
+from evaluation import evaluate_predictions
+
+
+def train_eval_conv(data, labels, data_test, labels_test, val_split=0.8, num_of_channels=1) :
+    classifier = Classifier()
+    
+    genres = set(list(labels))
+    inputs, outputs, model = classifier.cnn_model(num_classes=len(genres), num_of_channels=num_of_channels)
         
-        model = keras.Model(inputs, dense5)
-
-        return inputs, dense3, model
-
+    model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+                
+    model.summary()
             
+    encoder = LabelEncoder()
+    encoder.fit(labels)
+    encoded_Y = encoder.transform(labels)
+    
+    #dummy_y = np_utils.to_categorical(encoded_Y)
+    
+    #val_split = 0.75
+    data_len = len(data)
+    n_split = round(data_len * val_split) + 1
+    epochs = 50
+    batch_size = 4   
+    
+    callbacks = [
+         keras.callbacks.ModelCheckpoint("conv_classification", save_best_only=True)
+    ]
+    
+    tr_dat = []
+    tr_lab = []
+    va_dat = []
+    va_lab = []
+    
+    for i in range(len(data)) : 
+        if i < n_split-1 :
+            tr_dat.append(tf.convert_to_tensor(data[i]))
+            tr_lab.append(tf.convert_to_tensor(encoded_Y[i]))
+        else :
+            va_dat.append(tf.convert_to_tensor(data[i]))
+            va_lab.append(tf.convert_to_tensor(encoded_Y[i]))
+            
+    train_gen = SpectGen(tr_dat, tr_lab, batch_size=batch_size)
+    val_gen = SpectGen(va_dat, va_lab, batch_size=batch_size)
+    
+    tf.config.run_functions_eagerly(True)
+    history = model.fit(train_gen, validation_data=val_gen, epochs=epochs, batch_size=batch_size)
+    
+    model_dir = './models/convnet1/'
+    
+    model_names = [ mod_name for mod_name in os.listdir(model_dir) ]
+            
+    model_type_num = str(len(model_names) + 1)
+    #model_path = model_dir + 'model_' + feat + '_' + gen + '_' + prep + '_' + model_type_num
+    model_path = model_dir + 'model_' + model_type_num
+     
+    model.save(model_path)
+            
+    hist_df = pd.DataFrame(history.history) 
+            
+    #hist_json_file = model_dir + 'history_' + feat + '_' + gen + '_' + prep + '_' + model_type_num + '.json'
+    hist_json_file = model_dir + 'history_' + model_type_num + '.json'
+    
+    with open(hist_json_file, mode='w') as f:
+        hist_df.to_json(f)
+    
+    test_gen = SpectGen(data_test, labels_test, batch_size=1)
+    
+    predictions_raw = model.predict(test_gen)
+    predictions_raw = np.argmax(predictions_raw, axis=1)
+    
+    predictions = encoder.inverse_transform(predictions_raw)
+    
+    return evaluate_predictions(predictions, labels_test)
+
+
+def load_eval_conv(data_test, labels_test, model_name) :
+    model_dir = './models/convnet1/'
+    batch_size = 4
+            
+    model = keras.models.load_model(model_dir + model_name)
+    
+    
+    encoder = LabelEncoder()
+    encoder.fit(labels_test)
+    
+    test_gen = SpectGen(data_test, labels_test, batch_size=1)
+    
+    predictions_raw = model.predict(test_gen)
+    predictions_raw = np.argmax(predictions_raw, axis=1)
+    
+    predictions = encoder.inverse_transform(predictions_raw)
+    
+    return evaluate_predictions(predictions, labels_test)
+
 
 if __name__ == '__main__':
-    classifier = Classifier()
-    classifier.train_model(batch_size=3, num_epochs=60)
+    feat = 'mc'
+    gen = 'ps'
+    prep = 'mfccspectconv'
+    
+    if gen == 'all' :
+        genres = get_genres('all')
+    if gen == 'ps' :
+        genres = get_genres('paper_split')
+    if gen == 'cs1' :
+        genres = get_genres('custom_split')
+     
+    
+    data, labels, data_test, labels_test = load_data(split=0.8, shuffle=True, prep=prep, take_middle=True, genres=genres)
+    
+    evaluation = train_eval_conv(data, labels, data_test, labels_test)
 
-    print('blah')
+
+    
+"""  
+feat = 'mc'
+gen = 'ps'
+prep = 'mfccspectconv'
+
+if gen == 'all' :
+    genres = get_genres('all')
+if gen == 'ps' :
+    genres = get_genres('paper_split')
+if gen == 'cs1' :
+    genres = get_genres('custom_split')
+ 
+#features = get_features(feat)
+
+data_train, label_train, data_test, label_test = load_data(split=0.8, shuffle=True, prep=prep, take_middle=True, genres=genres)
+
+
+classifier = Classifier()
+
+inputs, outputs, model = classifier.cnn_model(num_classes=len(genres))
+        
+model.compile(loss='sparse_categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+            
+model.summary()
+        
+encoder = LabelEncoder()
+encoder.fit(label_train)
+encoded_Y = encoder.transform(label_train)
+
+#dummy_y = np_utils.to_categorical(encoded_Y)
+
+val_split = 0.75
+data_len = len(data_train)
+n_split = round(data_len * val_split) + 1
+epochs = 50
+batch_size = 3   
+
+callbacks = [
+     keras.callbacks.ModelCheckpoint("ear_segmentation", save_best_only=True)
+]
+
+tr_dat = []
+tr_lab = []
+va_dat = []
+va_lab = []
+
+for i in range(len(data_train)) : 
+    if i < n_split-1 :
+        tr_dat.append(tf.convert_to_tensor(data_train[i]))
+        tr_lab.append(tf.convert_to_tensor(encoded_Y[i]))
+    else :
+        va_dat.append(tf.convert_to_tensor(data_train[i]))
+        va_lab.append(tf.convert_to_tensor(encoded_Y[i]))
+        
+train_gen = SpectGen(tr_dat, tr_lab, batch_size=batch_size)
+val_gen = SpectGen(va_dat, va_lab, batch_size=batch_size)
+
+tf.config.run_functions_eagerly(True)
+history = model.fit(train_gen, validation_data=val_gen, epochs=epochs, batch_size=batch_size)
+
+model_dir = './models/convnet1/'
+
+model_names = [ mod_name for mod_name in os.listdir(model_dir) ]
+        
+model_type_num = str(len(model_names) + 1)
+model_path = model_dir + 'model_' + feat + '_' + gen + '_' + prep + '_' + model_type_num
+        
+model.save(model_path)
+        
+hist_df = pd.DataFrame(history.history) 
+        
+hist_json_file = model_dir + 'history_' + feat + '_' + gen + '_' + prep + '_' + model_type_num + '.json'
+with open(hist_json_file, mode='w') as f:
+    hist_df.to_json(f)
+
+test_gen = SpectGen(data_test, label_test, batch_size=batch_size)
+
+predictions_raw = model.predict(test_gen)
+predictions_raw = np.argmax(predictions_raw, axis=1)
+
+predictions = encoder.inverse_transform(predictions_raw)
+
+overall, classwise, conf, n_classes = evaluate_predictions(predictions, label_test)
+
+print(overall)
+print(classwise)
+print(conf)
+print(n_classes)
+
+"""

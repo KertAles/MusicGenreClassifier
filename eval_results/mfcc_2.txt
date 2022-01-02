@@ -1,0 +1,3 @@
+Clustering:  0.835
+SVM:  0.9199999999999999
+Deepnet:  0.97
